@@ -1,6 +1,7 @@
 """
 This file defines the core research contribution
 """
+import traceback
 import matplotlib
 matplotlib.use('Agg')
 import math
@@ -79,7 +80,7 @@ class pSp(nn.Module):
 				else:
 					codes = codes + self.latent_avg.repeat(codes.shape[0], 1, 1)
 
-
+		print(codes)
 		if latent_mask is not None:
 			for i in latent_mask:
 				if inject_latent is not None:
@@ -92,13 +93,13 @@ class pSp(nn.Module):
 
 		input_is_latent = not input_code
 		images, result_latent = self.decoder([codes],
-		                                     input_is_latent=input_is_latent,
+		                                     input_is_latent=True,
 		                                     randomize_noise=randomize_noise,
 		                                     return_latents=return_latents)
 
 		if resize:
 			images = self.face_pool(images)
-
+		
 		if return_latents:
 			return images, result_latent
 		else:

@@ -31,7 +31,8 @@ EXPERIMENT_DATA_ARGS = {
     "ffhq_encode": {
         "model_path": "pixel2style2pixel/pretrained_models/psp_ffhq_encode.pt",
         #"image_path": "notebooks/images/input_img.jpg",
-        "image_path": "/content/drive/MyDrive/me_more_res.jpg",
+        "image1_path": "/content/drive/MyDrive/me_more_res.jpg",
+        "image2_path": "/content/drive/MyDrive/me_frontal.jpg",
         
         "transform": transforms.Compose([
             transforms.Resize((256, 256)),
@@ -43,31 +44,6 @@ EXPERIMENT_DATA_ARGS = {
         #"image_path": "notebooks/images/input_img.jpg",
         "image_path": "/content/drive/MyDrive/me_frontal.jpg",
         "transform": transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
-    },
-    "celebs_sketch_to_face": {
-        "model_path": "pretrained_models/psp_celebs_sketch_to_face.pt",
-        "image_path": "notebooks/images/input_sketch.jpg",
-        "transform": transforms.Compose([
-            transforms.Resize((256, 256)),
-            transforms.ToTensor()])
-    },
-    "celebs_seg_to_face": {
-        "model_path": "pretrained_models/psp_celebs_seg_to_face.pt",
-        "image_path": "notebooks/images/input_mask.png",
-        "transform": transforms.Compose([
-            transforms.Resize((256, 256)),
-            augmentations.ToOneHot(n_classes=19),
-            transforms.ToTensor()])
-    },
-    "celebs_super_resolution": {
-        "model_path": "pretrained_models/psp_celebs_super_resolution.pt",
-        "image_path": "notebooks/images/input_img.jpg",
-        "transform": transforms.Compose([
-            transforms.Resize((256, 256)),
-            augmentations.BilinearResize(factors=[16]),
             transforms.Resize((256, 256)),
             transforms.ToTensor(),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])])
@@ -107,16 +83,23 @@ net.eval()
 net.cuda()
 print('Model successfully loaded!')
 
-image_path = EXPERIMENT_DATA_ARGS[experiment_type]["image_path"]
-original_image = Image.open(image_path)
+image_path1 = EXPERIMENT_DATA_ARGS[experiment_type]["image1_path"]
+original_image1 = Image.open(image_path1)
 if opts.label_nc == 0:
-    original_image = original_image.convert("RGB")
+    original_image1 = original_image1.convert("RGB")
 else:
-    original_image = original_image.convert("L")
+    original_image1 = original_image1.convert("L")
 
-original_image.resize((256, 256))
+original_image1.resize((256, 256))
 
-original_image.save("test.jpg")
+image_path2 = EXPERIMENT_DATA_ARGS[experiment_type]["image2_path"]
+original_image2 = Image.open(image_path2)
+if opts.label_nc == 0:
+    original_image2 = original_image2.convert("RGB")
+else:
+    original_image2 = original_image2.convert("L")
+
+original_image2.resize((256, 256))
 
 def run_alignment(image_path):  
   predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
@@ -124,31 +107,40 @@ def run_alignment(image_path):
   print("Aligned image has shape: {}".format(aligned_image.size))
   return aligned_image
 
-if experiment_type not in ["celebs_sketch_to_face", "celebs_seg_to_face"]:
-  input_image = run_alignment(image_path)
-else:
-  input_image = original_image
+
+input_image1 = run_alignment(image_path1)
+input_image2 = run_alignment(image_path2)
 
 img_transforms = EXPERIMENT_ARGS['transform']
-transformed_image = img_transforms(input_image)
+transformed_image1 = img_transforms(input_image1)
+transformed_image2 = img_transforms(input_image2)
 
-def run_on_batch(inputs, net):
-    result_batch = net(inputs.to("cuda").float())
-    return result_batch
+
 
 with torch.no_grad():
     tic = time.time()
-    result_image = run_on_batch(transformed_image.unsqueeze(0), net)[0]
+    result_image1, result_latent1 = net(transformed_image1.unsqueeze(0).to("cuda").float(), return_latents = True)
+    result_image2, result_latent2 = net(transformed_image2.unsqueeze(0).to("cuda").float(), return_latents = True)
+    images = []
+    for i in range(10):
+        t1 = i/10
+        t2 = 1- t1
+        avg = result_latent1* t1 + result_latent2*t2
+        mixed_image, result_latent = net(avg, return_latents = True, input_code = True)
+        images.append(mixed_image)
     toc = time.time()
-    print(result_image.shape)
     print('Inference took {:.4f} seconds.'.format(toc - tic))
 
-input_vis_image = log_input_image(transformed_image, opts)
-output_image = tensor2im(result_image)
+input_vis_image = log_input_image(transformed_image1, opts)
+output_images = []
+for img in images:
+    output_images.append(np.array(tensor2im(img[0]).resize((256, 256))))
 
-res = np.concatenate([np.array(input_vis_image.resize((256, 256))),
-                     np.array(output_image.resize((256, 256)))], axis=1)
+
+res = np.concatenate(output_images, axis=1)
 
 
 res_image = Image.fromarray(res)
-res_image.save("result.jpg")
+for index, output_image in enumerate(output_images):
+   res_image = Image.fromarray(output_image)
+   res_image.save(str(index) +"result.jpg")
